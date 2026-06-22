@@ -42,6 +42,39 @@ const EMERGENCY_TARGET = 5000000;
 const MONTHS_ID = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Ags","Sep","Okt","Nov","Des"];
 
 function fmt(n) { return "Rp " + Math.round(n).toLocaleString("id-ID"); }
+
+// Format angka dengan titik ribuan untuk input display
+function fmtInput(val) {
+  if (!val) return "";
+  const num = val.toString().replace(/\D/g, "");
+  return num.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+}
+// Parse input bertitik ke integer
+function parseInput(val) {
+  return parseInt(val.toString().replace(/\./g, "")) || 0;
+}
+
+function CurrencyInput({ value, onChange, placeholder, style = {} }) {
+  const [display, setDisplay] = useState(value ? fmtInput(String(value)) : "");
+  useEffect(() => {
+    if (!value) setDisplay("");
+  }, [value]);
+  function handleChange(e) {
+    const raw = e.target.value.replace(/\./g, "").replace(/\D/g, "");
+    setDisplay(fmtInput(raw));
+    onChange(raw);
+  }
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      value={display}
+      onChange={handleChange}
+      placeholder={placeholder}
+      style={{ ...style }}
+    />
+  );
+}
 function fmtShort(n) {
   if (n >= 1000000) return "Rp " + (n/1000000).toFixed(1).replace(".0","") + " jt";
   if (n >= 1000) return "Rp " + (n/1000).toFixed(0) + " rb";
@@ -191,7 +224,7 @@ export default function App() {
   const totalUnpaid = projects.reduce((s,p)=>s+(p.total-p.dp),0);
 
   function addEntry() {
-    const amount = parseInt(form.amount);
+    const amount = parseInput(form.amount);
     if (!amount||amount<=0) return;
     const entry = { id:Date.now(), type:form.type, amount, note:form.note||(form.type==="in"?"Pemasukan":"Pengeluaran"), category:form.category, date:new Date().toLocaleDateString("id-ID"), month:currentMonth };
     const next = [entry,...entries];
@@ -207,7 +240,7 @@ export default function App() {
   }
 
   function payDebt(id,amount) {
-    const parsed = parseInt(amount);
+    const parsed = parseInput(amount);
     if (!parsed||parsed<=0) return;
     const next = debts.map(d=>d.id!==id?d:{...d,paid:Math.min(d.total,d.paid+parsed)});
     setDebts(next);
@@ -216,7 +249,7 @@ export default function App() {
   }
 
   function addEmergency() {
-    const amt = parseInt(emergencyInput);
+    const amt = parseInput(emergencyInput);
     if (!amt||amt<=0) return;
     const next = emergency+amt;
     setEmergency(next);
@@ -225,8 +258,8 @@ export default function App() {
   }
 
   function saveProject() {
-    const total = parseInt(projForm.total);
-    const dp = parseInt(projForm.dp)||0;
+    const total = parseInput(projForm.total);
+    const dp = parseInput(projForm.dp)||0;
     if (!projForm.name||!total) return;
     const nextProjects = projForm.id
       ? projects.map(p=>p.id===projForm.id?{...p,name:projForm.name,total,dp,status:projForm.status,note:projForm.note}:p)
@@ -243,7 +276,7 @@ export default function App() {
   }
 
   function saveTarget() {
-    const t = parseInt(targetInput);
+    const t = parseInput(targetInput);
     if (!t||t<=0) return;
     setIncomeTarget(t);
     setTargetInput("");
@@ -387,7 +420,7 @@ export default function App() {
                 <div style={{height:"100%",width:edPct+"%",background:G,borderRadius:99}}/>
               </div>
               <div style={{display:"flex",gap:8}}>
-                <input type="number" value={emergencyInput} onChange={e=>setEmergencyInput(e.target.value)}
+                <CurrencyInput value={emergencyInput} onChange={v=>setEmergencyInput(v)}
                   placeholder="Tambah nominal" style={{flex:1,padding:"8px 10px",border:"1px solid #e0e0de",borderRadius:8,fontSize:13}}/>
                 <button onClick={addEmergency} style={{padding:"8px 12px",background:G,color:"white",border:"none",borderRadius:8,fontSize:13,cursor:"pointer"}}>+ Simpan</button>
               </div>
@@ -397,7 +430,7 @@ export default function App() {
             <Card>
               <div style={{fontSize:12,color:"#888",marginBottom:8}}>Target income bulan ini</div>
               <div style={{display:"flex",gap:8}}>
-                <input type="number" value={targetInput} onChange={e=>setTargetInput(e.target.value)}
+                <CurrencyInput value={targetInput} onChange={v=>setTargetInput(v)}
                   placeholder={fmt(incomeTarget)} style={{flex:1,padding:"8px 10px",border:"1px solid #e0e0de",borderRadius:8,fontSize:13}}/>
                 <button onClick={saveTarget} style={{padding:"8px 12px",background:G,color:"white",border:"none",borderRadius:8,fontSize:13,cursor:"pointer"}}>Set</button>
               </div>
@@ -479,7 +512,7 @@ export default function App() {
                   }}>{cat.icon} {cat.label}</button>
                 ))}
               </div>
-              <input type="number" value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))}
+              <CurrencyInput value={form.amount} onChange={v=>setForm(f=>({...f,amount:v}))}
                 placeholder="Nominal (Rp)" style={{width:"100%",padding:"9px 12px",border:"1px solid #e0e0de",borderRadius:8,fontSize:15,marginBottom:8,boxSizing:"border-box"}}/>
               <input type="text" value={form.note} onChange={e=>setForm(f=>({...f,note:e.target.value}))}
                 placeholder="Keterangan (opsional)" style={{width:"100%",padding:"9px 12px",border:"1px solid #e0e0de",borderRadius:8,fontSize:15,marginBottom:10,boxSizing:"border-box"}}/>
@@ -533,16 +566,16 @@ export default function App() {
             {projForm.show && (
               <Card>
                 <div style={{fontSize:13,fontWeight:500,marginBottom:10}}>{projForm.id?"Edit Proyek":"Proyek Baru"}</div>
-                {[
-                  {ph:"Nama klien / proyek",key:"name",type:"text"},
-                  {ph:"Nilai total (Rp)",key:"total",type:"number"},
-                  {ph:"DP sudah masuk (Rp)",key:"dp",type:"number"},
-                  {ph:"Catatan (opsional)",key:"note",type:"text"},
-                ].map(f=>(
-                  <input key={f.key} type={f.type} placeholder={f.ph} value={projForm[f.key]}
-                    onChange={e=>setProjForm(p=>({...p,[f.key]:e.target.value}))}
-                    style={{width:"100%",padding:"9px 12px",border:"1px solid #e0e0de",borderRadius:8,fontSize:14,marginBottom:8,boxSizing:"border-box"}}/>
-                ))}
+                <input type="text" placeholder="Nama klien / proyek" value={projForm.name}
+                  onChange={e=>setProjForm(p=>({...p,name:e.target.value}))}
+                  style={{width:"100%",padding:"9px 12px",border:"1px solid #e0e0de",borderRadius:8,fontSize:14,marginBottom:8,boxSizing:"border-box"}}/>
+                <CurrencyInput value={projForm.total} onChange={v=>setProjForm(p=>({...p,total:v}))}
+                  placeholder="Nilai total (Rp)" style={{width:"100%",padding:"9px 12px",border:"1px solid #e0e0de",borderRadius:8,fontSize:14,marginBottom:8,boxSizing:"border-box"}}/>
+                <CurrencyInput value={projForm.dp} onChange={v=>setProjForm(p=>({...p,dp:v}))}
+                  placeholder="DP sudah masuk (Rp)" style={{width:"100%",padding:"9px 12px",border:"1px solid #e0e0de",borderRadius:8,fontSize:14,marginBottom:8,boxSizing:"border-box"}}/>
+                <input type="text" placeholder="Catatan (opsional)" value={projForm.note}
+                  onChange={e=>setProjForm(p=>({...p,note:e.target.value}))}
+                  style={{width:"100%",padding:"9px 12px",border:"1px solid #e0e0de",borderRadius:8,fontSize:14,marginBottom:8,boxSizing:"border-box"}}/>
                 <select value={projForm.status} onChange={e=>setProjForm(p=>({...p,status:e.target.value}))}
                   style={{width:"100%",padding:"9px 12px",border:"1px solid #e0e0de",borderRadius:8,fontSize:14,marginBottom:10,boxSizing:"border-box"}}>
                   <option value="ongoing">Berjalan</option>
@@ -627,7 +660,7 @@ export default function App() {
                   {!lunas&&(
                     debtForm.id===d.id?(
                       <div style={{display:"flex",gap:8,marginTop:4}}>
-                        <input type="number" value={debtForm.amount} onChange={e=>setDebtForm(f=>({...f,amount:e.target.value}))}
+                        <CurrencyInput value={debtForm.amount} onChange={v=>setDebtForm(f=>({...f,amount:v}))}
                           placeholder="Nominal bayar" style={{flex:1,padding:"8px 10px",border:"1px solid #e0e0de",borderRadius:8,fontSize:14}}/>
                         <button onClick={()=>payDebt(d.id,debtForm.amount)} style={{padding:"8px 14px",background:G,color:"white",border:"none",borderRadius:8,fontSize:14,cursor:"pointer"}}>Bayar</button>
                         <button onClick={()=>setDebtForm({id:null,amount:""})} style={{padding:"8px 10px",background:"#f5f5f3",border:"none",borderRadius:8,fontSize:14,cursor:"pointer"}}>×</button>
