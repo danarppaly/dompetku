@@ -275,8 +275,8 @@ export default function App() {
     if (!entry) return;
     setSyncing(true);
     try {
-      const res = await api.post("entries", entry);
-      setEntries(prev=>[res[0]||entry,...prev]);
+      await api.post("entries", entry);
+      setEntries(prev=>[entry,...prev]);
       setForm({type:"out",amount:"",note:"",category:"makan"});
     } catch(e) { console.error(e); }
     setSyncing(false);
@@ -341,8 +341,8 @@ export default function App() {
         if (dpDiff > 0) {
           const src = PROJECT_SOURCES.find(s=>s.id===projForm.source)||PROJECT_SOURCES[3];
           const entry = { id:Date.now(), type:"in", amount:dpDiff, note:`DP ${projForm.name} (${src.label})`, category:"proyek", date:new Date().toLocaleDateString("id-ID"), month:currentMonth };
-          const res = await api.post("entries", entry);
-          setEntries(prev=>[res[0]||entry,...prev]);
+          await api.post("entries", entry);
+          setEntries(prev=>[entry,...prev]);
         }
       } else {
         const newProj = { id:Date.now(), name:projForm.name, total, dp, status:projForm.status, note:projForm.note, source:projForm.source, date:new Date().toLocaleDateString("id-ID") };
@@ -351,8 +351,8 @@ export default function App() {
         if (dp > 0) {
           const src = PROJECT_SOURCES.find(s=>s.id===projForm.source)||PROJECT_SOURCES[3];
           const entry = { id:Date.now()+1, type:"in", amount:dp, note:`DP ${projForm.name} (${src.label})`, category:"proyek", date:new Date().toLocaleDateString("id-ID"), month:currentMonth };
-          const eRes = await api.post("entries", entry);
-          setEntries(prev=>[eRes[0]||entry,...prev]);
+          await api.post("entries", entry);
+          setEntries(prev=>[newProj,...prev]);
         }
       }
       setProjForm({show:false,id:null,name:"",total:"",dp:"",dpPrev:0,status:"ongoing",note:"",source:"lainnya"});
@@ -748,7 +748,7 @@ export default function App() {
                     <div style={{height:"100%",width:pct+"%",background:G,borderRadius:99}}/>
                   </div>
                   <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:10}}>
-                    <span style={{color:G,fontWeight:500}}>{pct}% diterima</span>
+                    <span style=={{color:G,fontWeight:500}}>{pct}% diterima</span>
                     <span style={{color:"#E24B4A",fontWeight:500}}>Sisa {fmt(sisa)}</span>
                   </div>
                   <div style={{display:"flex",gap:8}}>
