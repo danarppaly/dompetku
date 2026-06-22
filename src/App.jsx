@@ -70,6 +70,10 @@ function saveData(data) { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)
 
 const G = "#1D9E75";
 
+function Card({children,style={}}) {
+  return <div style={{background:"white",borderRadius:12,padding:"1rem 1.25rem",marginBottom:12,boxShadow:"0 1px 3px rgba(0,0,0,0.06)",...style}}>{children}</div>;
+}
+
 export default function App() {
   const [pinState, setPinState] = useState("check");
   const [pinInput, setPinInput] = useState("");
@@ -267,10 +271,6 @@ export default function App() {
     {key:"proyek",label:"Proyek",icon:"🏗️"},
     {key:"utang",label:"Utang",icon:"📋"},
   ];
-
-  const Card = ({children,style={}}) => (
-    <div style={{background:"white",borderRadius:12,padding:"1rem 1.25rem",marginBottom:12,boxShadow:"0 1px 3px rgba(0,0,0,0.06)",...style}}>{children}</div>
-  );
 
   return (
     <div style={{maxWidth:430,margin:"0 auto",minHeight:"100vh",background:"#f7f7f5",fontFamily:"system-ui,-apple-system,sans-serif",paddingBottom:30}}>
