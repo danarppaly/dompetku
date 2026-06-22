@@ -1,21 +1,53 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from "recharts";
 
-const STORAGE_KEY = "dompetku_data";
+const SUPABASE_URL = "https://rdyksimtpnzjwapdyolw.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJkeWtzaW10cG56andhcGR5b2x3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIxMTY4MzgsImV4cCI6MjA5NzY5MjgzOH0.h0iLXptb9sOAK6zAZtW0ZlcywP6393vGkjJML7TccD]";
 const PIN_KEY = "dompetku_pin";
 
-const FIXED_BILLS = [
-  { id: "kas", label: "Cicilan Kas + Listrik RT", amount: 1100000, dueDay: 1, reminderDay: 25, icon: "🏘️" },
-  { id: "spp", label: "SPP Anak", amount: 700000, dueDay: 5, reminderDay: 28, icon: "🎒" },
-  { id: "internet", label: "Internet", amount: 150000, dueDay: 10, reminderDay: 7, icon: "📡" },
-  { id: "rt", label: "Iuran RT", amount: 130000, dueDay: 5, reminderDay: 28, icon: "🏠" },
+async function sb(path, options = {}) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    headers: {
+      "apikey": SUPABASE_KEY,
+      "Authorization": `Bearer ${SUPABASE_KEY}`,
+      "Content-Type": "application/json",
+      "Prefer": options.prefer || "return=representation",
+      ...options.headers,
+    },
+    ...options,
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(err);
+  }
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
+}
+
+const api = {
+  get: (table, query="") => sb(`${table}?${query}`, { method:"GET" }),
+  post: (table, body) => sb(table, { method:"POST", body: JSON.stringify(body) }),
+  patch: (table, query, body) => sb(`${table}?${query}`, { method:"PATCH", body: JSON.stringify(body), prefer:"return=representation" }),
+  delete: (table, query) => sb(`${table}?${query}`, { method:"DELETE", prefer:"return=minimal" }),
+  upsert: (table, body) => sb(table, { method:"POST", body: JSON.stringify(body), headers:{ "Prefer":"resolution=merge-duplicates,return=representation" } }),
+};
+
+const QUICK_EXPENSES = [
+  { id: "kas", label: "Kas + Listrik RT", amount: 1100000, icon: "🏘️", category: "tagihan" },
+  { id: "spp", label: "SPP Anak", amount: 700000, icon: "🎒", category: "anak" },
+  { id: "internet", label: "Internet", amount: 150000, icon: "📡", category: "tagihan" },
+  { id: "rt", label: "Iuran RT", amount: 130000, icon: "🏠", category: "tagihan" },
+  { id: "listrik", label: "Listrik", amount: 250000, icon: "⚡", category: "tagihan" },
+  { id: "air", label: "Air", amount: 60000, icon: "💧", category: "tagihan" },
+  { id: "gas", label: "Gas LPG", amount: 250000, icon: "🔥", category: "rumah" },
+  { id: "istri", label: "Uang Istri", amount: 500000, icon: "👩", category: "lainnya" },
 ];
 
-const SEMI_FIXED = [
-  { id: "listrik", label: "Listrik", defaultAmount: 250000, icon: "⚡" },
-  { id: "air", label: "Air", defaultAmount: 60000, icon: "💧" },
-  { id: "gas", label: "Gas LPG", defaultAmount: 250000, icon: "🔥" },
-  { id: "istri", label: "Uang Istri", defaultAmount: 500000, icon: "👩" },
+const FIXED_BILLS = [
+  { id: "kas", label: "Cicilan Kas + Listrik RT", amount: 1100000, dueDay: 1, icon: "🏘️" },
+  { id: "spp", label: "SPP Anak", amount: 700000, dueDay: 5, icon: "🎒" },
+  { id: "internet", label: "Internet", amount: 150000, dueDay: 10, icon: "📡" },
+  { id: "rt", label: "Iuran RT", amount: 130000, dueDay: 5, icon: "🏠" },
 ];
 
 const CATEGORIES = [
@@ -30,6 +62,13 @@ const CATEGORIES = [
   { id: "lainnya", label: "Lainnya", icon: "📦", color: "#888" },
 ];
 
+const PROJECT_SOURCES = [
+  { id: "skala1000", label: "Skala1000", icon: "🏛️" },
+  { id: "epicnesia", label: "Epicnesia Adit", icon: "🤝" },
+  { id: "bina", label: "Bina Project Gesang", icon: "🏗️" },
+  { id: "lainnya", label: "Lainnya", icon: "📦" },
+];
+
 const INITIAL_DEBTS = [
   { id: 1, label: "Kas (satpam)", total: 5000000, paid: 0, priority: 1, note: "Cicil Rp 1 jt/bulan", urgent: true },
   { id: 2, label: "Papa", total: 650000, paid: 0, priority: 2, note: "Lunasi saat ada surplus", urgent: true },
@@ -40,41 +79,9 @@ const INITIAL_DEBTS = [
 
 const EMERGENCY_TARGET = 5000000;
 const MONTHS_ID = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Ags","Sep","Okt","Nov","Des"];
+const G = "#1D9E75";
 
 function fmt(n) { return "Rp " + Math.round(n).toLocaleString("id-ID"); }
-
-// Format angka dengan titik ribuan untuk input display
-function fmtInput(val) {
-  if (!val) return "";
-  const num = val.toString().replace(/\D/g, "");
-  return num.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-}
-// Parse input bertitik ke integer
-function parseInput(val) {
-  return parseInt(val.toString().replace(/\./g, "")) || 0;
-}
-
-function CurrencyInput({ value, onChange, placeholder, style = {} }) {
-  const [display, setDisplay] = useState(value ? fmtInput(String(value)) : "");
-  useEffect(() => {
-    if (!value) setDisplay("");
-  }, [value]);
-  function handleChange(e) {
-    const raw = e.target.value.replace(/\./g, "").replace(/\D/g, "");
-    setDisplay(fmtInput(raw));
-    onChange(raw);
-  }
-  return (
-    <input
-      type="text"
-      inputMode="numeric"
-      value={display}
-      onChange={handleChange}
-      placeholder={placeholder}
-      style={{ ...style }}
-    />
-  );
-}
 function fmtShort(n) {
   if (n >= 1000000) return "Rp " + (n/1000000).toFixed(1).replace(".0","") + " jt";
   if (n >= 1000) return "Rp " + (n/1000).toFixed(0) + " rb";
@@ -94,17 +101,32 @@ function getDaysUntil(dueDay) {
   if (due < now) due.setMonth(due.getMonth()+1);
   return Math.ceil((due-now)/(1000*60*60*24));
 }
-
-function loadData() {
-  try { const r = localStorage.getItem(STORAGE_KEY); return r ? JSON.parse(r) : null; }
-  catch { return null; }
+function fmtInput(val) {
+  if (!val) return "";
+  const num = val.toString().replace(/\D/g,"");
+  return num.replace(/\B(?=(\d{3})+(?!\d))/g,".");
 }
-function saveData(data) { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
+function parseInput(val) {
+  return parseInt(val.toString().replace(/\./g,"").replace(/\D/g,"")) || 0;
+}
 
-const G = "#1D9E75";
+function CurrencyInput({ value, onChange, placeholder, style={} }) {
+  const [display, setDisplay] = useState(value ? fmtInput(String(value)) : "");
+  useEffect(() => { if (!value) setDisplay(""); }, [value]);
+  function handleChange(e) {
+    const raw = e.target.value.replace(/\./g,"").replace(/\D/g,"");
+    setDisplay(fmtInput(raw));
+    onChange(raw);
+  }
+  return <input type="text" inputMode="numeric" value={display} onChange={handleChange} placeholder={placeholder} style={style}/>;
+}
 
-function Card({children,style={}}) {
+function Card({children, style={}}) {
   return <div style={{background:"white",borderRadius:12,padding:"1rem 1.25rem",marginBottom:12,boxShadow:"0 1px 3px rgba(0,0,0,0.06)",...style}}>{children}</div>;
+}
+
+function Spinner() {
+  return <div style={{textAlign:"center",padding:"3rem",color:"#888",fontSize:14}}>Memuat data...</div>;
 }
 
 export default function App() {
@@ -112,40 +134,67 @@ export default function App() {
   const [pinInput, setPinInput] = useState("");
   const [pinError, setPinError] = useState("");
   const [newPin, setNewPin] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
 
   const [tab, setTab] = useState("dashboard");
   const [entries, setEntries] = useState([]);
-  const [debts, setDebts] = useState(INITIAL_DEBTS);
+  const [debts, setDebts] = useState([]);
   const [projects, setProjects] = useState([]);
   const [emergency, setEmergency] = useState(1200000);
-  const [semiFix, setSemiFix] = useState(SEMI_FIXED.map(s=>({...s,amount:s.defaultAmount})));
-  const [form, setForm] = useState({ type:"in", amount:"", note:"", category:"makan" });
+  const [incomeTarget, setIncomeTarget] = useState(5000000);
+  const [billsPaid, setBillsPaid] = useState({});
+
+  const [form, setForm] = useState({ type:"out", amount:"", note:"", category:"makan" });
+  const [quickEdit, setQuickEdit] = useState(null);
   const [debtForm, setDebtForm] = useState({ id:null, amount:"" });
   const [emergencyInput, setEmergencyInput] = useState("");
-  const [projForm, setProjForm] = useState({ show:false, id:null, name:"", total:"", dp:"", status:"ongoing", note:"" });
-  const [currentMonth] = useState(getCurrentMonth());
-  const [incomeTarget, setIncomeTarget] = useState(5000000);
+  const [projForm, setProjForm] = useState({ show:false, id:null, name:"", total:"", dp:"", dpPrev:0, status:"ongoing", note:"", source:"lainnya" });
   const [targetInput, setTargetInput] = useState("");
   const [activeCategory, setActiveCategory] = useState(null);
-  const [billsPaid, setBillsPaid] = useState({});
+
+  const [currentMonth] = useState(getCurrentMonth());
 
   useEffect(() => {
     const pin = localStorage.getItem(PIN_KEY);
     setPinState(!pin ? "setup" : "locked");
-    const saved = loadData();
-    if (saved) {
-      if (saved.entries) setEntries(saved.entries);
-      if (saved.debts) setDebts(saved.debts);
-      if (saved.emergency !== undefined) setEmergency(saved.emergency);
-      if (saved.projects) setProjects(saved.projects);
-      if (saved.incomeTarget) setIncomeTarget(saved.incomeTarget);
-      if (saved.semiFix) setSemiFix(saved.semiFix);
-      if (saved.billsPaid) setBillsPaid(saved.billsPaid);
-    }
   }, []);
 
-  function persist(e,d,em,p,it,sf,bp) {
-    saveData({ entries:e, debts:d, emergency:em, projects:p, incomeTarget:it, semiFix:sf, billsPaid:bp });
+  const loadAll = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [ent, proj, dbt, sett] = await Promise.all([
+        api.get("entries", "order=id.desc"),
+        api.get("projects", "order=id.desc"),
+        api.get("debts", "order=priority.asc"),
+        api.get("settings"),
+      ]);
+      setEntries(ent || []);
+      setProjects(proj || []);
+      if (dbt && dbt.length > 0) setDebts(dbt);
+      else {
+        await Promise.all(INITIAL_DEBTS.map(d => api.upsert("debts", d)));
+        setDebts(INITIAL_DEBTS);
+      }
+      if (sett) {
+        sett.forEach(s => {
+          if (s.key === "emergency") setEmergency(parseInt(s.value)||1200000);
+          if (s.key === "incomeTarget") setIncomeTarget(parseInt(s.value)||5000000);
+          if (s.key === "billsPaid") setBillsPaid(JSON.parse(s.value||"{}"));
+        });
+      }
+    } catch(e) {
+      console.error(e);
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    if (pinState === "unlocked") loadAll();
+  }, [pinState, loadAll]);
+
+  async function saveSetting(key, value) {
+    await api.upsert("settings", { key, value: String(value) });
   }
 
   function handleSetPin() {
@@ -159,22 +208,21 @@ export default function App() {
     else { setPinError("PIN salah"); setPinInput(""); }
   }
 
-  // PIN screens
   const pinScreen = (isSetup) => (
-    <div style={{ maxWidth:430, margin:"0 auto", minHeight:"100vh", background:"#f7f7f5", display:"flex", alignItems:"center", justifyContent:"center", padding:"2rem" }}>
-      <div style={{ background:"white", borderRadius:16, padding:"2rem", width:"100%", boxShadow:"0 2px 12px rgba(0,0,0,0.08)" }}>
-        <div style={{ fontSize:36, textAlign:"center", marginBottom:8 }}>💰</div>
-        <div style={{ fontSize:18, fontWeight:600, textAlign:"center", marginBottom:4 }}>Dompetku</div>
-        <div style={{ fontSize:13, color:"#888", textAlign:"center", marginBottom:20 }}>{isSetup?"Buat PIN untuk keamanan":"Masukkan PIN untuk masuk"}</div>
+    <div style={{maxWidth:430,margin:"0 auto",minHeight:"100vh",background:"#f7f7f5",display:"flex",alignItems:"center",justifyContent:"center",padding:"2rem"}}>
+      <div style={{background:"white",borderRadius:16,padding:"2rem",width:"100%",boxShadow:"0 2px 12px rgba(0,0,0,0.08)"}}>
+        <div style={{fontSize:36,textAlign:"center",marginBottom:8}}>💰</div>
+        <div style={{fontSize:18,fontWeight:600,textAlign:"center",marginBottom:4}}>Dompetku</div>
+        <div style={{fontSize:13,color:"#888",textAlign:"center",marginBottom:20}}>{isSetup?"Buat PIN untuk keamanan":"Masukkan PIN untuk masuk"}</div>
         <input type="password" inputMode="numeric" maxLength={6}
           value={isSetup?newPin:pinInput}
           onChange={e=>isSetup?setNewPin(e.target.value):setPinInput(e.target.value)}
           onKeyDown={e=>e.key==="Enter"&&(isSetup?handleSetPin():handleUnlock())}
           placeholder={isSetup?"PIN baru (min. 4 angka)":"Masukkan PIN"}
-          style={{ width:"100%", padding:"14px", border:"1px solid #e0e0de", borderRadius:10, fontSize:20, textAlign:"center", letterSpacing:10, marginBottom:10, boxSizing:"border-box" }} />
-        {pinError && <div style={{ color:"#E24B4A", fontSize:13, textAlign:"center", marginBottom:8 }}>{pinError}</div>}
+          style={{width:"100%",padding:"14px",border:"1px solid #e0e0de",borderRadius:10,fontSize:20,textAlign:"center",letterSpacing:10,marginBottom:10,boxSizing:"border-box"}}/>
+        {pinError && <div style={{color:"#E24B4A",fontSize:13,textAlign:"center",marginBottom:8}}>{pinError}</div>}
         <button onClick={isSetup?handleSetPin:handleUnlock}
-          style={{ width:"100%", padding:13, background:G, color:"white", border:"none", borderRadius:10, fontSize:15, fontWeight:500, cursor:"pointer" }}>
+          style={{width:"100%",padding:13,background:G,color:"white",border:"none",borderRadius:10,fontSize:15,fontWeight:500,cursor:"pointer"}}>
           {isSetup?"Simpan PIN":"Masuk"}
         </button>
       </div>
@@ -184,7 +232,6 @@ export default function App() {
   if (pinState==="setup") return pinScreen(true);
   if (pinState==="locked") return pinScreen(false);
 
-  // Data computations
   const monthEntries = entries.filter(e=>e.month===currentMonth);
   const totalIncome = monthEntries.filter(e=>e.type==="in").reduce((s,e)=>s+e.amount,0);
   const totalExpense = monthEntries.filter(e=>e.type==="out").reduce((s,e)=>s+e.amount,0);
@@ -204,106 +251,155 @@ export default function App() {
     });
   })();
 
-  // Reminders
-  const reminders = FIXED_BILLS.map(bill => {
+  const reminders = FIXED_BILLS.map(bill=>{
     const daysLeft = getDaysUntil(bill.dueDay);
     const paidKey = `${getCurrentMonth()}-${bill.id}`;
-    const paid = billsPaid[paidKey];
-    return { ...bill, daysLeft, paid, paidKey };
-  }).filter(b => !b.paid && b.daysLeft <= 7);
+    return {...bill, daysLeft, paid:billsPaid[paidKey], paidKey};
+  }).filter(b=>!b.paid && b.daysLeft<=7);
 
-  // Category breakdown
-  const catBreakdown = CATEGORIES.map(cat => {
+  const catBreakdown = CATEGORIES.map(cat=>{
     const items = monthEntries.filter(e=>e.type==="out"&&e.category===cat.id);
-    const total = items.reduce((s,e)=>s+e.amount,0);
-    return { ...cat, total, items };
+    return {...cat, total:items.reduce((s,e)=>s+e.amount,0), items};
   }).filter(c=>c.total>0).sort((a,b)=>b.total-a.total);
 
   const totalProjectValue = projects.reduce((s,p)=>s+p.total,0);
   const totalDpReceived = projects.reduce((s,p)=>s+p.dp,0);
   const totalUnpaid = projects.reduce((s,p)=>s+(p.total-p.dp),0);
 
-  function addEntry() {
-    const amount = parseInput(form.amount);
+  async function addEntry(overrideEntry) {
+    const entry = overrideEntry || (() => {
+      const amount = parseInput(form.amount);
+      if (!amount||amount<=0) return null;
+      return { id:Date.now(), type:form.type, amount, note:form.note||(form.type==="in"?"Pemasukan":"Pengeluaran"), category:form.category, date:new Date().toLocaleDateString("id-ID"), month:currentMonth };
+    })();
+    if (!entry) return;
+    setSyncing(true);
+    try {
+      const res = await api.post("entries", entry);
+      setEntries(prev=>[res[0]||entry,...prev]);
+      setForm({type:"out",amount:"",note:"",category:"makan"});
+    } catch(e) { console.error(e); }
+    setSyncing(false);
+  }
+
+  async function addQuickExpense() {
+    if (!quickEdit) return;
+    const amount = parseInput(String(quickEdit.editAmount));
     if (!amount||amount<=0) return;
-    const entry = { id:Date.now(), type:form.type, amount, note:form.note||(form.type==="in"?"Pemasukan":"Pengeluaran"), category:form.category, date:new Date().toLocaleDateString("id-ID"), month:currentMonth };
-    const next = [entry,...entries];
-    setEntries(next);
-    setForm({type:"in",amount:"",note:"",category:"makan"});
-    persist(next,debts,emergency,projects,incomeTarget,semiFix,billsPaid);
+    await addEntry({ id:Date.now(), type:"out", amount, note:quickEdit.label, category:quickEdit.category, date:new Date().toLocaleDateString("id-ID"), month:currentMonth });
+    setQuickEdit(null);
   }
 
-  function deleteEntry(id) {
-    const next = entries.filter(e=>e.id!==id);
-    setEntries(next);
-    persist(next,debts,emergency,projects,incomeTarget,semiFix,billsPaid);
+  async function deleteEntry(id) {
+    setSyncing(true);
+    try {
+      await api.delete("entries", `id=eq.${id}`);
+      setEntries(prev=>prev.filter(e=>e.id!==id));
+    } catch(e) { console.error(e); }
+    setSyncing(false);
   }
 
-  function payDebt(id,amount) {
+  async function payDebt(id, amount) {
     const parsed = parseInput(amount);
     if (!parsed||parsed<=0) return;
-    const next = debts.map(d=>d.id!==id?d:{...d,paid:Math.min(d.total,d.paid+parsed)});
-    setDebts(next);
-    setDebtForm({id:null,amount:""});
-    persist(entries,next,emergency,projects,incomeTarget,semiFix,billsPaid);
+    const debt = debts.find(d=>d.id===id);
+    if (!debt) return;
+    const newPaid = Math.min(debt.total, debt.paid+parsed);
+    setSyncing(true);
+    try {
+      await api.patch("debts", `id=eq.${id}`, { paid:newPaid });
+      setDebts(prev=>prev.map(d=>d.id===id?{...d,paid:newPaid}:d));
+      setDebtForm({id:null,amount:""});
+    } catch(e) { console.error(e); }
+    setSyncing(false);
   }
 
-  function addEmergency() {
+  async function addEmergency() {
     const amt = parseInput(emergencyInput);
     if (!amt||amt<=0) return;
     const next = emergency+amt;
-    setEmergency(next);
-    setEmergencyInput("");
-    persist(entries,debts,next,projects,incomeTarget,semiFix,billsPaid);
+    setSyncing(true);
+    try {
+      await saveSetting("emergency", next);
+      setEmergency(next);
+      setEmergencyInput("");
+    } catch(e) { console.error(e); }
+    setSyncing(false);
   }
 
-  function saveProject() {
+  async function saveProject() {
     const total = parseInput(projForm.total);
     const dp = parseInput(projForm.dp)||0;
     if (!projForm.name||!total) return;
-    const nextProjects = projForm.id
-      ? projects.map(p=>p.id===projForm.id?{...p,name:projForm.name,total,dp,status:projForm.status,note:projForm.note}:p)
-      : [{id:Date.now(),name:projForm.name,total,dp,status:projForm.status,note:projForm.note,date:new Date().toLocaleDateString("id-ID")},...projects];
-    setProjects(nextProjects);
-    setProjForm({show:false,id:null,name:"",total:"",dp:"",status:"ongoing",note:""});
-    persist(entries,debts,emergency,nextProjects,incomeTarget,semiFix,billsPaid);
+    setSyncing(true);
+    try {
+      if (projForm.id) {
+        const existing = projects.find(p=>p.id===projForm.id);
+        const dpDiff = dp - (existing?.dp||0);
+        await api.patch("projects", `id=eq.${projForm.id}`, { name:projForm.name, total, dp, status:projForm.status, note:projForm.note, source:projForm.source });
+        setProjects(prev=>prev.map(p=>p.id===projForm.id?{...p,name:projForm.name,total,dp,status:projForm.status,note:projForm.note,source:projForm.source}:p));
+        if (dpDiff > 0) {
+          const src = PROJECT_SOURCES.find(s=>s.id===projForm.source)||PROJECT_SOURCES[3];
+          const entry = { id:Date.now(), type:"in", amount:dpDiff, note:`DP ${projForm.name} (${src.label})`, category:"proyek", date:new Date().toLocaleDateString("id-ID"), month:currentMonth };
+          const res = await api.post("entries", entry);
+          setEntries(prev=>[res[0]||entry,...prev]);
+        }
+      } else {
+        const newProj = { id:Date.now(), name:projForm.name, total, dp, status:projForm.status, note:projForm.note, source:projForm.source, date:new Date().toLocaleDateString("id-ID") };
+        const res = await api.post("projects", newProj);
+        setProjects(prev=>[res[0]||newProj,...prev]);
+        if (dp > 0) {
+          const src = PROJECT_SOURCES.find(s=>s.id===projForm.source)||PROJECT_SOURCES[3];
+          const entry = { id:Date.now()+1, type:"in", amount:dp, note:`DP ${projForm.name} (${src.label})`, category:"proyek", date:new Date().toLocaleDateString("id-ID"), month:currentMonth };
+          const eRes = await api.post("entries", entry);
+          setEntries(prev=>[eRes[0]||entry,...prev]);
+        }
+      }
+      setProjForm({show:false,id:null,name:"",total:"",dp:"",dpPrev:0,status:"ongoing",note:"",source:"lainnya"});
+    } catch(e) { console.error(e); }
+    setSyncing(false);
   }
 
-  function deleteProject(id) {
-    const next = projects.filter(p=>p.id!==id);
-    setProjects(next);
-    persist(entries,debts,emergency,next,incomeTarget,semiFix,billsPaid);
+  async function deleteProject(id) {
+    setSyncing(true);
+    try {
+      await api.delete("projects", `id=eq.${id}`);
+      setProjects(prev=>prev.filter(p=>p.id!==id));
+    } catch(e) { console.error(e); }
+    setSyncing(false);
   }
 
-  function saveTarget() {
+  async function saveTarget() {
     const t = parseInput(targetInput);
     if (!t||t<=0) return;
-    setIncomeTarget(t);
-    setTargetInput("");
-    persist(entries,debts,emergency,projects,t,semiFix,billsPaid);
+    setSyncing(true);
+    try {
+      await saveSetting("incomeTarget", t);
+      setIncomeTarget(t);
+      setTargetInput("");
+    } catch(e) { console.error(e); }
+    setSyncing(false);
   }
 
-  function markBillPaid(paidKey) {
+  async function markBillPaid(paidKey) {
     const next = {...billsPaid,[paidKey]:true};
-    setBillsPaid(next);
-    persist(entries,debts,emergency,projects,incomeTarget,semiFix,next);
-  }
-
-  function updateSemiFix(id,val) {
-    const next = semiFix.map(s=>s.id===id?{...s,amount:parseInt(val)||s.defaultAmount}:s);
-    setSemiFix(next);
-    persist(entries,debts,emergency,projects,incomeTarget,next,billsPaid);
+    setSyncing(true);
+    try {
+      await saveSetting("billsPaid", JSON.stringify(next));
+      setBillsPaid(next);
+    } catch(e) { console.error(e); }
+    setSyncing(false);
   }
 
   const statusColor = {ongoing:"#185FA5",selesai:"#1D9E75",nunggak:"#E24B4A"};
   const statusLabel = {ongoing:"Berjalan",selesai:"Lunas",nunggak:"Nunggak"};
-
   const tabs = [
     {key:"dashboard",label:"Ringkasan",icon:"📊"},
     {key:"catat",label:"Catat",icon:"✏️"},
     {key:"proyek",label:"Proyek",icon:"🏗️"},
     {key:"utang",label:"Utang",icon:"📋"},
   ];
+  const inputStyle = {width:"100%",padding:"9px 12px",border:"1px solid #e0e0de",borderRadius:8,fontSize:14,marginBottom:8,boxSizing:"border-box"};
 
   return (
     <div style={{maxWidth:430,margin:"0 auto",minHeight:"100vh",background:"#f7f7f5",fontFamily:"system-ui,-apple-system,sans-serif",paddingBottom:30}}>
@@ -312,7 +408,7 @@ export default function App() {
       <div style={{background:G,padding:"1.25rem 1rem 1rem",color:"white"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
           <div>
-            <div style={{fontSize:13,opacity:0.8,marginBottom:2}}>Dompetku</div>
+            <div style={{fontSize:13,opacity:0.8,marginBottom:2}}>Dompetku {syncing&&"·  menyimpan..."}</div>
             <div style={{fontSize:28,fontWeight:600}}>{fmt(balance)}</div>
             <div style={{fontSize:12,opacity:0.75,marginTop:2}}>Saldo bersih bulan ini</div>
           </div>
@@ -337,16 +433,16 @@ export default function App() {
               <div>
                 <div style={{fontSize:13,fontWeight:500,color:r.daysLeft<=3?"#E24B4A":"#7a5a00"}}>{r.icon} {r.label}</div>
                 <div style={{fontSize:12,color:r.daysLeft<=3?"#E24B4A":"#7a5a00",opacity:0.8}}>
-                  {r.daysLeft===0?"Jatuh tempo hari ini!":`Jatuh tempo ${r.daysLeft} hari lagi`} · {fmt(r.amount)}
+                  {r.daysLeft===0?"Jatuh tempo hari ini!":`${r.daysLeft} hari lagi`} · {fmt(r.amount)}
                 </div>
               </div>
-              <button onClick={()=>markBillPaid(r.paidKey)} style={{background:r.daysLeft<=3?"#E24B4A":G,border:"none",borderRadius:8,padding:"6px 10px",color:"white",fontSize:12,cursor:"pointer",whiteSpace:"nowrap"}}>✓ Lunas</button>
+              <button onClick={()=>markBillPaid(r.paidKey)} style={{background:r.daysLeft<=3?"#E24B4A":G,border:"none",borderRadius:8,padding:"6px 10px",color:"white",fontSize:12,cursor:"pointer"}}>✓ Lunas</button>
             </div>
           ))}
         </div>
       )}
 
-      {/* Tab bar */}
+      {/* Tabs */}
       <div style={{display:"flex",background:"white",borderBottom:"1px solid #e8e8e6",position:"sticky",top:0,zIndex:10}}>
         {tabs.map(t=>(
           <button key={t.key} onClick={()=>setTab(t.key)} style={{flex:1,padding:"10px 2px",background:"none",border:"none",borderBottom:tab===t.key?"2px solid "+G:"2px solid transparent",color:tab===t.key?G:"#888",fontSize:11,fontWeight:500,cursor:"pointer"}}>
@@ -355,6 +451,7 @@ export default function App() {
         ))}
       </div>
 
+      {loading ? <Spinner/> : (
       <div style={{padding:"1rem"}}>
 
         {/* DASHBOARD */}
@@ -374,7 +471,6 @@ export default function App() {
               ))}
             </div>
 
-            {/* Category breakdown */}
             {catBreakdown.length>0 && (
               <Card>
                 <div style={{fontSize:12,color:"#888",marginBottom:10}}>Pengeluaran per kategori</div>
@@ -383,12 +479,12 @@ export default function App() {
                     <div onClick={()=>setActiveCategory(activeCategory===cat.id?null:cat.id)}
                       style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"0.5px solid #f0f0ee",cursor:"pointer"}}>
                       <div style={{display:"flex",alignItems:"center",gap:8}}>
-                        <span style={{fontSize:16}}>{cat.icon}</span>
+                        <span>{cat.icon}</span>
                         <span style={{fontSize:14,color:"#333"}}>{cat.label}</span>
                       </div>
                       <div style={{display:"flex",alignItems:"center",gap:8}}>
                         <span style={{fontSize:14,fontWeight:600,color:cat.color}}>{fmt(cat.total)}</span>
-                        <span style={{fontSize:12,color:"#aaa"}}>{activeCategory===cat.id?"▲":"▼"}</span>
+                        <span style={{fontSize:11,color:"#aaa"}}>{activeCategory===cat.id?"▲":"▼"}</span>
                       </div>
                     </div>
                     {activeCategory===cat.id && (
@@ -409,7 +505,6 @@ export default function App() {
               </Card>
             )}
 
-            {/* Dana darurat */}
             <Card>
               <div style={{fontSize:12,color:"#888",marginBottom:6}}>Dana darurat — target {fmt(EMERGENCY_TARGET)}</div>
               <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
@@ -426,7 +521,6 @@ export default function App() {
               </div>
             </Card>
 
-            {/* Target income */}
             <Card>
               <div style={{fontSize:12,color:"#888",marginBottom:8}}>Target income bulan ini</div>
               <div style={{display:"flex",gap:8}}>
@@ -436,7 +530,6 @@ export default function App() {
               </div>
             </Card>
 
-            {/* Chart */}
             <Card>
               <div style={{fontSize:12,color:"#888",marginBottom:12}}>Tren 6 bulan (ribu Rp)</div>
               <ResponsiveContainer width="100%" height={180}>
@@ -451,7 +544,6 @@ export default function App() {
               </ResponsiveContainer>
             </Card>
 
-            {/* Tagihan tetap */}
             <Card>
               <div style={{fontSize:12,color:"#888",marginBottom:10}}>Tagihan tetap bulanan</div>
               {FIXED_BILLS.map(b=>{
@@ -466,22 +558,10 @@ export default function App() {
                         {paid?"✓ Sudah dibayar":`Tanggal ${b.dueDay} · ${days} hari lagi`}
                       </div>
                     </div>
-                    <div style={{textAlign:"right"}}>
-                      <div style={{fontWeight:500,fontSize:14}}>{fmt(b.amount)}</div>
-                    </div>
+                    <div style={{fontWeight:500,fontSize:14}}>{fmt(b.amount)}</div>
                   </div>
                 );
               })}
-              <div style={{marginTop:10,paddingTop:8,borderTop:"0.5px solid #f0f0ee"}}>
-                <div style={{fontSize:12,color:"#888",marginBottom:8}}>Pengeluaran bisa berubah</div>
-                {semiFix.map(s=>(
-                  <div key={s.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0"}}>
-                    <span style={{fontSize:14,color:"#555"}}>{s.icon} {s.label}</span>
-                    <input type="number" value={s.amount} onChange={e=>updateSemiFix(s.id,e.target.value)}
-                      style={{width:100,padding:"4px 8px",border:"1px solid #e0e0de",borderRadius:6,fontSize:13,textAlign:"right"}}/>
-                  </div>
-                ))}
-              </div>
             </Card>
           </div>
         )}
@@ -490,7 +570,32 @@ export default function App() {
         {tab==="catat" && (
           <div>
             <Card>
-              <div style={{fontSize:12,color:"#888",marginBottom:10}}>Tambah catatan</div>
+              <div style={{fontSize:12,color:"#888",marginBottom:10}}>⚡ Pengeluaran Cepat</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                {QUICK_EXPENSES.map(q=>(
+                  <button key={q.id} onClick={()=>setQuickEdit({...q,editAmount:String(q.amount)})}
+                    style={{padding:"10px 8px",background:"#f7f7f5",border:"1px solid #e8e8e6",borderRadius:10,cursor:"pointer",textAlign:"left"}}>
+                    <div style={{fontSize:16,marginBottom:3}}>{q.icon}</div>
+                    <div style={{fontSize:12,fontWeight:500,color:"#333"}}>{q.label}</div>
+                    <div style={{fontSize:11,color:G,fontWeight:500}}>{fmt(q.amount)}</div>
+                  </button>
+                ))}
+              </div>
+              {quickEdit && (
+                <div style={{marginTop:12,padding:"12px",background:"#e1f5ee",borderRadius:10}}>
+                  <div style={{fontSize:13,fontWeight:500,marginBottom:8,color:"#0F6E56"}}>{quickEdit.icon} {quickEdit.label}</div>
+                  <CurrencyInput value={quickEdit.editAmount} onChange={v=>setQuickEdit(q=>({...q,editAmount:v}))}
+                    placeholder="Nominal" style={{width:"100%",padding:"9px 12px",border:"1px solid #b2dfd0",borderRadius:8,fontSize:15,marginBottom:8,boxSizing:"border-box"}}/>
+                  <div style={{display:"flex",gap:8}}>
+                    <button onClick={addQuickExpense} style={{flex:1,padding:"10px",background:G,color:"white",border:"none",borderRadius:8,fontSize:14,fontWeight:500,cursor:"pointer"}}>✓ Simpan</button>
+                    <button onClick={()=>setQuickEdit(null)} style={{padding:"10px 14px",background:"white",border:"none",borderRadius:8,fontSize:14,cursor:"pointer"}}>Batal</button>
+                  </div>
+                </div>
+              )}
+            </Card>
+
+            <Card>
+              <div style={{fontSize:12,color:"#888",marginBottom:10}}>Input Manual</div>
               <div style={{display:"flex",gap:8,marginBottom:8}}>
                 {["in","out"].map(t=>(
                   <button key={t} onClick={()=>setForm(f=>({...f,type:t}))} style={{
@@ -502,13 +607,14 @@ export default function App() {
                   }}>{t==="in"?"⬆ Pemasukan":"⬇ Pengeluaran"}</button>
                 ))}
               </div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:8}}>
                 {CATEGORIES.filter(c=>form.type==="in"?c.id==="proyek"||c.id==="lainnya":c.id!=="proyek").map(cat=>(
                   <button key={cat.id} onClick={()=>setForm(f=>({...f,category:cat.id}))} style={{
                     padding:"8px 6px",border:"1.5px solid",fontSize:12,cursor:"pointer",borderRadius:8,
                     borderColor:form.category===cat.id?cat.color:"#e0e0de",
                     background:form.category===cat.id?cat.color+"18":"white",
-                    color:form.category===cat.id?cat.color:"#888",fontWeight:form.category===cat.id?500:400
+                    color:form.category===cat.id?cat.color:"#888",
+                    fontWeight:form.category===cat.id?500:400
                   }}>{cat.icon} {cat.label}</button>
                 ))}
               </div>
@@ -516,7 +622,7 @@ export default function App() {
                 placeholder="Nominal (Rp)" style={{width:"100%",padding:"9px 12px",border:"1px solid #e0e0de",borderRadius:8,fontSize:15,marginBottom:8,boxSizing:"border-box"}}/>
               <input type="text" value={form.note} onChange={e=>setForm(f=>({...f,note:e.target.value}))}
                 placeholder="Keterangan (opsional)" style={{width:"100%",padding:"9px 12px",border:"1px solid #e0e0de",borderRadius:8,fontSize:15,marginBottom:10,boxSizing:"border-box"}}/>
-              <button onClick={addEntry} style={{width:"100%",padding:"11px",background:G,color:"white",border:"none",borderRadius:8,fontSize:15,fontWeight:500,cursor:"pointer"}}>Simpan</button>
+              <button onClick={()=>addEntry()} style={{width:"100%",padding:"11px",background:G,color:"white",border:"none",borderRadius:8,fontSize:15,fontWeight:500,cursor:"pointer"}}>Simpan</button>
             </Card>
 
             <Card>
@@ -558,7 +664,23 @@ export default function App() {
               ))}
             </div>
 
-            <button onClick={()=>setProjForm({show:true,id:null,name:"",total:"",dp:"",status:"ongoing",note:""})}
+            {projects.length>0 && (
+              <Card>
+                <div style={{fontSize:12,color:"#888",marginBottom:10}}>Income per sumber</div>
+                {PROJECT_SOURCES.map(src=>{
+                  const total = projects.filter(p=>p.source===src.id).reduce((s,p)=>s+p.dp,0);
+                  if (!total) return null;
+                  return (
+                    <div key={src.id} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"0.5px solid #f0f0ee",fontSize:14}}>
+                      <span style={{color:"#555"}}>{src.icon} {src.label}</span>
+                      <span style={{fontWeight:500,color:G}}>{fmt(total)}</span>
+                    </div>
+                  );
+                })}
+              </Card>
+            )}
+
+            <button onClick={()=>setProjForm({show:true,id:null,name:"",total:"",dp:"",dpPrev:0,status:"ongoing",note:"",source:"lainnya"})}
               style={{width:"100%",padding:"11px",background:G,color:"white",border:"none",borderRadius:10,fontSize:14,fontWeight:500,cursor:"pointer",marginBottom:12}}>
               + Tambah Proyek
             </button>
@@ -567,24 +689,34 @@ export default function App() {
               <Card>
                 <div style={{fontSize:13,fontWeight:500,marginBottom:10}}>{projForm.id?"Edit Proyek":"Proyek Baru"}</div>
                 <input type="text" placeholder="Nama klien / proyek" value={projForm.name}
-                  onChange={e=>setProjForm(p=>({...p,name:e.target.value}))}
-                  style={{width:"100%",padding:"9px 12px",border:"1px solid #e0e0de",borderRadius:8,fontSize:14,marginBottom:8,boxSizing:"border-box"}}/>
+                  onChange={e=>setProjForm(p=>({...p,name:e.target.value}))} style={inputStyle}/>
+                <div style={{fontSize:12,color:"#888",marginBottom:6}}>Sumber proyek</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:8}}>
+                  {PROJECT_SOURCES.map(src=>(
+                    <button key={src.id} onClick={()=>setProjForm(p=>({...p,source:src.id}))} style={{
+                      padding:"8px 6px",border:"1.5px solid",fontSize:12,cursor:"pointer",borderRadius:8,
+                      borderColor:projForm.source===src.id?G:"#e0e0de",
+                      background:projForm.source===src.id?"#e1f5ee":"white",
+                      color:projForm.source===src.id?G:"#888",
+                      fontWeight:projForm.source===src.id?500:400
+                    }}>{src.icon} {src.label}</button>
+                  ))}
+                </div>
                 <CurrencyInput value={projForm.total} onChange={v=>setProjForm(p=>({...p,total:v}))}
-                  placeholder="Nilai total (Rp)" style={{width:"100%",padding:"9px 12px",border:"1px solid #e0e0de",borderRadius:8,fontSize:14,marginBottom:8,boxSizing:"border-box"}}/>
+                  placeholder="Nilai total (Rp)" style={{...inputStyle}}/>
                 <CurrencyInput value={projForm.dp} onChange={v=>setProjForm(p=>({...p,dp:v}))}
-                  placeholder="DP sudah masuk (Rp)" style={{width:"100%",padding:"9px 12px",border:"1px solid #e0e0de",borderRadius:8,fontSize:14,marginBottom:8,boxSizing:"border-box"}}/>
-                <input type="text" placeholder="Catatan (opsional)" value={projForm.note}
-                  onChange={e=>setProjForm(p=>({...p,note:e.target.value}))}
-                  style={{width:"100%",padding:"9px 12px",border:"1px solid #e0e0de",borderRadius:8,fontSize:14,marginBottom:8,boxSizing:"border-box"}}/>
-                <select value={projForm.status} onChange={e=>setProjForm(p=>({...p,status:e.target.value}))}
-                  style={{width:"100%",padding:"9px 12px",border:"1px solid #e0e0de",borderRadius:8,fontSize:14,marginBottom:10,boxSizing:"border-box"}}>
+                  placeholder="DP sudah masuk (Rp)" style={{...inputStyle}}/>
+                <div style={{fontSize:11,color:"#888",marginBottom:8,marginTop:-4}}>DP otomatis masuk ke pemasukan bulan ini</div>
+                <select value={projForm.status} onChange={e=>setProjForm(p=>({...p,status:e.target.value}))} style={{...inputStyle}}>
                   <option value="ongoing">Berjalan</option>
                   <option value="selesai">Lunas</option>
                   <option value="nunggak">Nunggak</option>
                 </select>
+                <input type="text" placeholder="Catatan (opsional)" value={projForm.note}
+                  onChange={e=>setProjForm(p=>({...p,note:e.target.value}))} style={inputStyle}/>
                 <div style={{display:"flex",gap:8}}>
                   <button onClick={saveProject} style={{flex:1,padding:"10px",background:G,color:"white",border:"none",borderRadius:8,fontSize:14,cursor:"pointer"}}>Simpan</button>
-                  <button onClick={()=>setProjForm({show:false,id:null,name:"",total:"",dp:"",status:"ongoing",note:""})}
+                  <button onClick={()=>setProjForm({show:false,id:null,name:"",total:"",dp:"",dpPrev:0,status:"ongoing",note:"",source:"lainnya"})}
                     style={{padding:"10px 14px",background:"#f5f5f3",border:"none",borderRadius:8,fontSize:14,cursor:"pointer"}}>Batal</button>
                 </div>
               </Card>
@@ -592,13 +724,15 @@ export default function App() {
 
             {projects.length===0 && <div style={{textAlign:"center",color:"#aaa",padding:"2rem 0",fontSize:14}}>Belum ada proyek</div>}
             {projects.map(p=>{
-              const sisa = p.total-p.dp;
-              const pct = Math.round((p.dp/p.total)*100);
+              const sisa=p.total-p.dp;
+              const pct=Math.round((p.dp/p.total)*100);
+              const src=PROJECT_SOURCES.find(s=>s.id===p.source)||PROJECT_SOURCES[3];
               return (
                 <Card key={p.id}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
-                    <div>
+                    <div style={{flex:1}}>
                       <div style={{fontWeight:600,fontSize:15}}>{p.name}</div>
+                      <div style={{fontSize:12,color:G,marginTop:2}}>{src.icon} {src.label}</div>
                       {p.note&&<div style={{fontSize:12,color:"#888",marginTop:2}}>{p.note}</div>}
                       <div style={{fontSize:11,color:"#aaa",marginTop:2}}>{p.date}</div>
                     </div>
@@ -618,7 +752,7 @@ export default function App() {
                     <span style={{color:"#E24B4A",fontWeight:500}}>Sisa {fmt(sisa)}</span>
                   </div>
                   <div style={{display:"flex",gap:8}}>
-                    <button onClick={()=>setProjForm({show:true,id:p.id,name:p.name,total:p.total,dp:p.dp,status:p.status,note:p.note||""})}
+                    <button onClick={()=>setProjForm({show:true,id:p.id,name:p.name,total:String(p.total),dp:String(p.dp),dpPrev:p.dp,status:p.status,note:p.note||"",source:p.source||"lainnya"})}
                       style={{flex:1,padding:"8px",background:"#f5f5f3",border:"none",borderRadius:8,fontSize:13,cursor:"pointer"}}>Edit</button>
                     <button onClick={()=>deleteProject(p.id)}
                       style={{padding:"8px 12px",background:"#fcebeb",border:"none",borderRadius:8,fontSize:13,color:"#E24B4A",cursor:"pointer"}}>Hapus</button>
@@ -677,6 +811,7 @@ export default function App() {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }
